@@ -5,6 +5,7 @@
 #include "json.hpp"
 #include <random>
 
+
 static const uint32_t NUM_ROWS = 15;
 
 // Constants
@@ -24,8 +25,7 @@ const double CARNIVORE_MOVE_PROBABILITY = 0.5;
 const double CARNIVORE_EAT_PROBABILITY = 1.0;
 
 
-std::mutex m;
-std::condition_variable cv_grid;
+
 
 // Type definitions
 enum entity_type_t
@@ -49,7 +49,16 @@ struct entity_t
     int32_t age;
     int32_t row;
     int32_t col;
+    bool ja_rodei;
 };
+
+std::mutex m;
+std::condition_variable cv_grid;
+std::vector<entity_t> entities;
+std::vector<std::thread> vetor_de_threads;
+int count_finished_threads = 0;
+
+bool run_threads = false;
 
 // Auxiliary code to convert the entity_type_t enum to a string
 NLOHMANN_JSON_SERIALIZE_ENUM(entity_type_t, {
@@ -69,30 +78,64 @@ namespace nlohmann
 }
 
 
-
-
-void plant_simulation(){
+void plant_simulation(entity_t* my_plant){
+    
     while(true){
-        // std::unique_lock lk(m);
-        // cv_grid.wait(lk, []{ return 0; });
+        {
+            std::unique_lock lk(m);
+            
+            while(!run_threads || my_plant->ja_rodei){
+                cv_grid.wait(lk);
+            }
+            
+            std::cout<< "Planta:\n Idade: " << my_plant->age 
+                    << "linha: " << my_plant->row 
+                    << "Coluna: " << my_plant->col<< std::endl;
+            
+
+            count_finished_threads++;
+            my_plant->ja_rodei = true;
+        }
     }
 }
 
-void herbivore_simulation(){
+void herbivore_simulation(entity_t* my_herbivore){
     while(true){
-        // std::unique_lock lk(m);
-        // cv_grid.wait(lk, []{ return 0; });
+        {
+            std::unique_lock lk(m);
+            
+            while(!run_threads || my_herbivore->ja_rodei){
+                cv_grid.wait(lk);
+            }
+
+            std::cout<< "Herbivoro:\n Idade: " << my_herbivore->age 
+                    << "linha: " << my_herbivore->row 
+                    << "Coluna: " << my_herbivore->col<< std::endl;
+
+            count_finished_threads++;
+            my_herbivore->ja_rodei = true;
+        }
     }
 }
 
-void carnivore_simulation(){
+void carnivore_simulation(entity_t* my_carnivore){
     while(true){
-        // std::unique_lock lk(m);
-        // cv_grid.wait(lk, []{ return 0; });
+        {
+            std::unique_lock lk(m);
+            
+            while(!run_threads || my_carnivore->ja_rodei){
+                cv_grid.wait(lk);
+            }
+            
+            std::cout<< "Carnivoro:\n Idade: " << my_carnivore->age 
+                    << "linha: " << my_carnivore->row 
+                    << "Coluna: " << my_carnivore->col<< std::endl;
+            
+            count_finished_threads++;
+            my_carnivore->ja_rodei = true;
+        }
     }
 }
-
-
 
 // Grid that contains the entities
 static std::vector<std::vector<entity_t>> entity_grid;
@@ -131,13 +174,14 @@ int main()
         // Create the entities
         // <YOUR CODE HERE>
 
-        std::vector<entity_t> entities;
+        
         for(int i = 0; i < (uint32_t)request_body["plants"]; i++){
             entity_t _plant;
             
             _plant.age = 0;
             _plant.energy = 0;
             _plant.type = plant;
+            _plant.ja_rodei = false;
 
             entities.push_back(_plant);
         }
@@ -148,6 +192,7 @@ int main()
             _herb.age = 0;
             _herb.energy = 100;
             _herb.type = herbivore;
+            _herb.ja_rodei = false;
 
             entities.push_back(_herb);
         }
@@ -158,6 +203,7 @@ int main()
             _carni.age = 0;
             _carni.energy = 100;
             _carni.type = carnivore;
+            _carni.ja_rodei = false;
 
             entities.push_back(_carni);
         }
@@ -182,16 +228,21 @@ int main()
             entities[i].row = row;
             entities[i].col = col;
 
-            if(entities[i].type == carnivore){
-                
-            }else if(entities[i].type == herbivore){
-
-            }else if(entities[i].type == plant){
-
-            }
             entity_grid[row][col] = entities[i];
 
         }
+
+        for(int i = 0; i < entities.size(); i++){
+            if(entities[i].type == carnivore){
+                vetor_de_threads.push_back(std::thread(carnivore_simulation, &entities[i]));
+            }else if(entities[i].type == herbivore){
+                vetor_de_threads.push_back(std::thread(herbivore_simulation, &entities[i]));
+            }else if(entities[i].type == plant){
+                vetor_de_threads.push_back(std::thread(plant_simulation, &entities[i]));
+            }
+        }
+
+
         // Return the JSON representation of the entity grid
         nlohmann::json json_grid = entity_grid; 
         res.body = json_grid.dump();
@@ -203,13 +254,32 @@ int main()
                                {
         // Simulate the next iteration
         // Iterate over the entity grid and simulate the behaviour of each entity
+
+        m.lock();
+        count_finished_threads = 0;
+        run_threads = true;
+
+        for(int i = 0; i < entities.size(); i++){
+            entities[i].ja_rodei = false;
+        }
+        m.unlock();
+
+        cv_grid.notify_all();
         
-        // <YOUR CODE HERE>
-        
+
+        while(count_finished_threads < vetor_de_threads.size());
+
+        m.lock();
+        run_threads = false;
+        m.unlock();
+
         // Return the JSON representation of the entity grid
         nlohmann::json json_grid = entity_grid; 
         return json_grid.dump(); });
     app.port(8080).run();
 
+    for(int i = 0; i < vetor_de_threads.size(); i++){
+        vetor_de_threads[i].join();
+    }
     return 0;
 }
