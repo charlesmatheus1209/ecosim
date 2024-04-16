@@ -121,7 +121,7 @@ void atualiza_grid(){
     for(int i = 0; i < entities.size(); i++){
         int row = entities[i].position.i;
         int col = entities[i].position.j;
-        if(row >=0 && col >= 0 && entities[i].type != empty){
+        if(entities[i].type != empty){
             entity_grid[row][col] = entities[i];
         }
     }
@@ -135,19 +135,7 @@ double generate_random_number(double min, double max){
     return dis(gen);
 }
 
-void kill_entity(entity_t e){
-    int to_remove = -1;
 
-    for(int i = 0; i < entities.size(); i++){
-        if(entities[i].id == e.id){
-            to_remove = i;
-        }
-    }
-
-    if(to_remove >= 0){
-        entities.erase(entities.begin() + to_remove);
-    }
-}
 
 void plant_simulation(entity_t* my_plant){
     
@@ -155,19 +143,19 @@ void plant_simulation(entity_t* my_plant){
         {
             std::unique_lock lk(m);
             
-            while(!run_threads || my_plant->ja_rodei){
+            //while(!run_threads || my_plant->ja_rodei){
                 cv_grid.wait(lk);
-            }
+            //}
 
-            /*std::cout<< "Planta:\n Idade: " << my_plant->age 
+            std::cout<< "Planta:\n Idade: " << my_plant->age 
                      << "linha: " << my_plant->position.i
-                     << "Coluna: " << my_plant->position.j << std::endl;*/
+                     << "Coluna: " << my_plant->position.j << std::endl;
 
            
             my_plant->age++;
 
             count_finished_threads++;
-            my_plant->ja_rodei = true;
+            //my_plant->ja_rodei = true;
         }
     }
 }
@@ -177,13 +165,13 @@ void herbivore_simulation(entity_t* my_herbivore){
         {
             std::unique_lock lk(m);
             
-            while(!run_threads || my_herbivore->ja_rodei){
+            //while(!run_threads || my_herbivore->ja_rodei){
                 cv_grid.wait(lk);
-            }
+            //}
 
-            /*std::cout<< "Herbivoro:\n Idade: " << my_herbivore->age 
+            std::cout<< "Herbivoro:\n Idade: " << my_herbivore->age 
                      << "linha: " << my_herbivore->position.i
-                     << "Coluna: " << my_herbivore->position.j<< std::endl;*/
+                     << "Coluna: " << my_herbivore->position.j<< std::endl;
 
             if(my_herbivore->age <= HERBIVORE_MAXIMUM_AGE){
                 my_herbivore->age++;
@@ -197,14 +185,20 @@ void herbivore_simulation(entity_t* my_herbivore){
                 }
                 
             }else{
-                kill_entity(*my_herbivore);
-                std::cout << "Removidooooooo" << std::endl;
-                count_finished_threads++;
-                break;
+                int k = -1;
+                for(int i = 0; i < entities.size(); i++){
+                    if(entities[i].id == my_herbivore->id){
+                        k = i;
+                        entities[i].type = empty;
+                    }
+                }
+
+                entities.erase(entities.begin() + k);
+                return;
             }
             
             count_finished_threads++;
-            my_herbivore->ja_rodei = true;
+            //my_herbivore->ja_rodei = true;
         }
     }
 }
@@ -214,36 +208,39 @@ void carnivore_simulation(entity_t* my_carnivore){
         {
             std::unique_lock lk(m);
             
-            while(!run_threads || my_carnivore->ja_rodei){
+            //while(!run_threads || my_herbivore->ja_rodei){
                 cv_grid.wait(lk);
-            }
+            //}   
             
-            /*std::cout<< "Carnivoro:\n Idade: " << my_carnivore->age 
+            std::cout<< "Carnivoro:\n Idade: " << my_carnivore->age 
                     << "linha: " << my_carnivore->position.i
-                    << "Coluna: " << my_carnivore->position.j << std::endl;*/
+                    << "Coluna: " << my_carnivore->position.j << std::endl;
 
             if(my_carnivore->age <= CARNIVORE_MAXIMUM_AGE){
+                my_carnivore->age++;
+                
                 if(generate_random_number(0, 100) > 100*CARNIVORE_MOVE_PROBABILITY){
                     if(my_carnivore->energy >= 5){
                         pos_t new_pos = find_new_position(*my_carnivore);    
                         my_carnivore->position = new_pos;
                         my_carnivore->energy -= 5;
                     }                
-                }
+                }                
                 
-                
-                my_carnivore->age++;
             }else{
-                /*kill_entity(*my_carnivore);
+                int k = -1;
+                for(int i = 0; i < entities.size(); i++){
+                    if(entities[i].id == my_carnivore->id){
+                        k = i;
+                    }
+                }
 
-                std::cout << "Removidooooooo" << std::endl;
-                count_finished_threads++;
-                m.unlock();
-                return;*/
+                entities.erase(entities.begin() + k);
+                return;
             }
             
             count_finished_threads++;            
-            my_carnivore->ja_rodei = true;
+            //my_carnivore->ja_rodei = true;
         }
     }
 }
@@ -371,11 +368,7 @@ int main()
 
         m.lock();
         count_finished_threads = 0;
-        run_threads = true;
-
-        for(int i = 0; i < entities.size(); i++){
-            entities[i].ja_rodei = false;
-        }
+        //run_threads = true;
         m.unlock();
 
         cv_grid.notify_all();
@@ -383,11 +376,10 @@ int main()
         int www = 0;
         while(count_finished_threads < entities.size()){
             www = entities.size();
-        }
-        ;
+        };
 
         m.lock();
-        run_threads = false;
+        //run_threads = false;
 
         atualiza_grid();
         m.unlock();
