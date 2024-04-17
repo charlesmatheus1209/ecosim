@@ -47,7 +47,6 @@ struct entity_t
     int32_t age;
     pos_t position;
     bool vivo;
-    int32_t id;
 };
 
 std::mutex m;
@@ -56,7 +55,6 @@ std::condition_variable cv_fim_threads;
 std::vector<entity_t> entities;
 std::vector<std::thread> vetor_de_threads;
 int count_finished_threads = 0;
-int last_id = 0;
 int entities_alive = 0;
 
 bool run_threads = false;
@@ -81,12 +79,40 @@ namespace nlohmann
     }
 }
 
+pos_t find_herbivore_to_eat(entity_t e){
+    std::vector<pos_t> possible_herbivore;
+
+    for(int i = e.position.i - 1; i <= e.position.i + 1; i++){
+        for(int j = e.position.j - 1; j <= e.position.j + 1; j++){
+            if(i >= 0 && i < NUM_ROWS && j >= 0 && j < NUM_ROWS){
+                // Não está na borda
+                if(entity_grid[i][j].type == herbivore && entity_grid[i][j].vivo == true){
+                    pos_t p;
+                    p.i = i;
+                    p.j = j;
+                    possible_herbivore.push_back(p);
+                }
+            }
+        }
+    }
+
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    int x = possible_herbivore.size();
+    if(possible_herbivore.size() > 0){
+        std::uniform_real_distribution<> dis(0, possible_herbivore.size()-1);
+        return possible_herbivore[dis(gen)];
+    }else{
+        return e.position;
+    }
+
+}
+
 pos_t find_plant_to_eat(entity_t e){
     std::vector<pos_t> possible_plants;
 
     for(int i = e.position.i - 1; i <= e.position.i + 1; i++){
         for(int j = e.position.j - 1; j <= e.position.j + 1; j++){
-            //std::cout << "i = " << i << " j = " << j << std::endl;
             if(i >= 0 && i < NUM_ROWS && j >= 0 && j < NUM_ROWS){
                 // Não está na borda
                 if(entity_grid[i][j].type == plant && entity_grid[i][j].vivo == true){
@@ -118,7 +144,6 @@ pos_t find_new_position(entity_t e){
 
     for(int i = e.position.i - 1; i <= e.position.i + 1; i++){
         for(int j = e.position.j - 1; j <= e.position.j + 1; j++){
-            //std::cout << "i = " << i << " j = " << j << std::endl;
             if(i >= 0 && i < NUM_ROWS && j >= 0 && j < NUM_ROWS){
                 // Não está na borda
                 if(entity_grid[i][j].type == empty && entity_grid[i][j].vivo != true){
@@ -130,10 +155,6 @@ pos_t find_new_position(entity_t e){
             }
         }
     }
-
-    /*for(int i = 0; i < possible_positions.size(); i++){
-        std::cout << "i = " << possible_positions[i].i << " j = " << possible_positions[i].j << std::endl;
-    }*/
 
     static std::random_device rd;
     static std::mt19937 gen(rd());
@@ -156,7 +177,7 @@ double generate_random_number(double min, double max){
 
 
 
-void plant_simulation(int id){
+void plant_simulation(int i, int j){
     
    
     std::unique_lock lk(m);
@@ -166,41 +187,33 @@ void plant_simulation(int id){
     }
 
     pos_t my_plant;
-    my_plant.i = -1;
-    my_plant.j = -1;
+    my_plant.i = i;
+    my_plant.j = j;
 
-    for(int i = 0; i < entity_grid.size(); i++){
-        for(int j = 0; j < entity_grid[i].size(); j++){
-            if(entity_grid[i][j].id == id){
-                my_plant.i = i;
-                my_plant.j = j;
-            }
-        }
-    }
     
     if(entity_grid[my_plant.i][my_plant.j].vivo == false){
+        std::cout << "Planta i: " << i  << " j: " << j << "Morreu" << std::endl;
         return;
     }
     
     if(entity_grid[my_plant.i][my_plant.j].age >= PLANT_MAXIMUM_AGE){
+        std::cout << "Planta i: " << i  << " j: " << j << "Morreu" << std::endl;
         entity_grid[my_plant.i][my_plant.j].type = empty;
         entity_grid[my_plant.i][my_plant.j].vivo = false;
         entity_grid[my_plant.i][my_plant.j].age = 0;
         entity_grid[my_plant.i][my_plant.j].energy = 0;
-        entity_grid[my_plant.i][my_plant.j].id = -1;
         return;
     }
 
-    if(generate_random_number(0, 100) >= 100*PLANT_REPRODUCTION_PROBABILITY){
-        std::cout << "Planta id: " << id << " procriando" << std::endl;
+    if(generate_random_number(0, 100) <= 100*PLANT_REPRODUCTION_PROBABILITY){
+        std::cout << "Planta i: " << i  << " j: " << j << " procriando" << std::endl;
         
         pos_t new_pos = find_new_position(entity_grid[my_plant.i][my_plant.j]);
 
-        if(entity_grid[new_pos.i][new_pos.j].type == empty && new_pos.i != my_plant.i && new_pos.j != my_plant.j){
+        if(!(new_pos.i == my_plant.i && new_pos.j == my_plant.j)){
             entity_grid[new_pos.i][new_pos.j].energy = 0;
             entity_grid[new_pos.i][new_pos.j].age = 0;
             entity_grid[new_pos.i][new_pos.j].position = new_pos;
-            entity_grid[new_pos.i][new_pos.j].id = last_id++;
             entity_grid[new_pos.i][new_pos.j].vivo = true;
             entity_grid[new_pos.i][new_pos.j].type = plant;
         }
@@ -210,17 +223,17 @@ void plant_simulation(int id){
     }
 
 
-    std::cout<< "Planta:\n Idade: " << entity_grid[my_plant.i][my_plant.j].age 
+    /*std::cout<< "Planta:\n Idade: " << entity_grid[my_plant.i][my_plant.j].age 
                 << "linha: " << entity_grid[my_plant.i][my_plant.j].position.i
                 << "Coluna: " << entity_grid[my_plant.i][my_plant.j].position.j 
-                << "Vivo: " << entity_grid[my_plant.i][my_plant.j].vivo << std::endl;
+                << "Vivo: " << entity_grid[my_plant.i][my_plant.j].vivo << std::endl;*/
 
     
     entity_grid[my_plant.i][my_plant.j].age++;
         
 }
 
-void herbivore_simulation(int id){
+void herbivore_simulation(int i, int j){
     
     std::unique_lock lk(m);
     
@@ -229,58 +242,51 @@ void herbivore_simulation(int id){
     }
 
     pos_t my_herbivore;
-    my_herbivore.i = -1;
-    my_herbivore.j = -1;
+    my_herbivore.i = i;
+    my_herbivore.j = j;
     
-    for(int i = 0; i < entity_grid.size(); i++){
-        for(int j = 0; j < entity_grid[i].size(); j++){
-            if(entity_grid[i][j].id == id){
-                my_herbivore.i = i;
-                my_herbivore.j = j;
-            }
-        }
-    }
 
     if(entity_grid[my_herbivore.i][my_herbivore.j].vivo == false){
+        std::cout << "Herbivoro i: " << i  << " j: " << j << "Morreu" << std::endl;
         return;
     }
 
     if(entity_grid[my_herbivore.i][my_herbivore.j].age >= HERBIVORE_MAXIMUM_AGE || entity_grid[my_herbivore.i][my_herbivore.j].energy == 0){
+        std::cout << "Herbivoro i: " << i  << " j: " << j << "Morreu" << std::endl;
         entity_grid[my_herbivore.i][my_herbivore.j].type = empty;
         entity_grid[my_herbivore.i][my_herbivore.j].vivo = false;
         entity_grid[my_herbivore.i][my_herbivore.j].age = 0;
         entity_grid[my_herbivore.i][my_herbivore.j].energy = 0;
-        entity_grid[my_herbivore.i][my_herbivore.j].id = -1;
         return;
     }
 
 
-    if(generate_random_number(0,100) >= 100*HERBIVORE_EAT_PROBABILITY){ // Comer planta
+    if(generate_random_number(0,100) <= 100*HERBIVORE_EAT_PROBABILITY){ // Comer planta
         pos_t plant_to_eat = find_plant_to_eat(entity_grid[my_herbivore.i][my_herbivore.j]);
-
-        if(plant_to_eat.i != my_herbivore.i && plant_to_eat.j != my_herbivore.j){
+        if(!(plant_to_eat.i == my_herbivore.i && plant_to_eat.j == my_herbivore.j)){
+            std::cout << "herbivoro i: " << i  << " j: " << j << "Comeu Planta" << std::endl;
             entity_grid[plant_to_eat.i][plant_to_eat.j].type = empty;
             entity_grid[plant_to_eat.i][plant_to_eat.j].vivo = false;
             entity_grid[plant_to_eat.i][plant_to_eat.j].age = 0;
             entity_grid[plant_to_eat.i][plant_to_eat.j].energy = 0;
-            entity_grid[plant_to_eat.i][plant_to_eat.j].id = -1;
 
             entity_grid[my_herbivore.i][my_herbivore.j].energy += 30;
+            entity_grid[my_herbivore.i][my_herbivore.j].age ++;
 
             return;
         }
     }
 
-    if(generate_random_number(0,100) >= 100*HERBIVORE_REPRODUCTION_PROBABILITY){ // Reprodução
+    if(generate_random_number(0,100) <= 100*HERBIVORE_REPRODUCTION_PROBABILITY){ // Reprodução
         if(entity_grid[my_herbivore.i][my_herbivore.j].energy >= 20){
             pos_t new_pos = find_new_position(entity_grid[my_herbivore.i][my_herbivore.j]);
 
-            if(new_pos.i != my_herbivore.i && new_pos.j != my_herbivore.j){
+            if(!(new_pos.i == my_herbivore.i && new_pos.j == my_herbivore.j)){
+                std::cout << "Herbivoro i: " << i  << " j: " << j << " Reproduziu" << std::endl;
                 entity_grid[new_pos.i][new_pos.j].type = herbivore;
                 entity_grid[new_pos.i][new_pos.j].vivo = true;
                 entity_grid[new_pos.i][new_pos.j].age = 0;
                 entity_grid[new_pos.i][new_pos.j].energy = 100;
-                entity_grid[new_pos.i][new_pos.j].id = last_id++;
 
                 entity_grid[my_herbivore.i][my_herbivore.j].energy -= 10;
                 entity_grid[my_herbivore.i][my_herbivore.j].age ++;
@@ -289,11 +295,12 @@ void herbivore_simulation(int id){
         }
     }
 
-    if(generate_random_number(0, 100) >= 100*HERBIVORE_MOVE_PROBABILITY){
-        std::cout << "Herbivoro id: " << id << " Mudando de lugar" << std::endl;
+    if(generate_random_number(0, 100) <= 100*HERBIVORE_MOVE_PROBABILITY){
+        
         if(entity_grid[my_herbivore.i][my_herbivore.j].energy >= 5){
             pos_t new_pos = find_new_position(entity_grid[my_herbivore.i][my_herbivore.j]);
-            if(new_pos.i != my_herbivore.i && new_pos.j != my_herbivore.j){
+            if(!(new_pos.i == my_herbivore.i && new_pos.j == my_herbivore.j)){
+                std::cout << "Herbivoro i: " << i << " j: " << j << " Mudando de lugar" << std::endl;
                 entity_grid[new_pos.i][new_pos.j] = entity_grid[my_herbivore.i][my_herbivore.j];
                 entity_grid[new_pos.i][new_pos.j].energy -= 5;
                 entity_grid[new_pos.i][new_pos.j].age += 1;
@@ -303,7 +310,6 @@ void herbivore_simulation(int id){
                 entity_grid[my_herbivore.i][my_herbivore.j].vivo = false;
                 entity_grid[my_herbivore.i][my_herbivore.j].age = 0;
                 entity_grid[my_herbivore.i][my_herbivore.j].energy = 0;
-                entity_grid[my_herbivore.i][my_herbivore.j].id = -1;
             }else{
               entity_grid[my_herbivore.i][my_herbivore.j].age ++;  
             }
@@ -314,17 +320,17 @@ void herbivore_simulation(int id){
 
 
 
-    std::cout<< "Herbivoro:\n Idade: " << entity_grid[my_herbivore.i][my_herbivore.j].age 
+   /* std::cout<< "Herbivoro:\n Idade: " << entity_grid[my_herbivore.i][my_herbivore.j].age 
                 << "linha: " << entity_grid[my_herbivore.i][my_herbivore.j].position.i
                 << "Coluna: " << entity_grid[my_herbivore.i][my_herbivore.j].position.j
-                << "Vivo: " << entity_grid[my_herbivore.i][my_herbivore.j].vivo << std::endl;
+                << "Vivo: " << entity_grid[my_herbivore.i][my_herbivore.j].vivo << std::endl;*/
 
     
     entity_grid[my_herbivore.i][my_herbivore.j].age++;          
         
 }
 
-void carnivore_simulation(int id){
+void carnivore_simulation(int i, int j){
    
     std::unique_lock lk(m);
     
@@ -333,40 +339,67 @@ void carnivore_simulation(int id){
     }
 
     pos_t my_carnivore;
-    my_carnivore.i = -1;
-    my_carnivore.j = -1;
-
-    for(int i = 0; i < entity_grid.size(); i++){
-        for(int j = 0; j < entity_grid[i].size(); j++){
-            if(entity_grid[i][j].id == id){
-                my_carnivore.i = i;
-                my_carnivore.j = j;
-            }
-        }
-    }
-    
+    my_carnivore.i = i;
+    my_carnivore.j = j;
     
 
     if(entity_grid[my_carnivore.i][my_carnivore.j].vivo == false){
+        std::cout << "Carnivoro i: " << i << " j: " << j << " Morreu" << std::endl;
         entity_grid[my_carnivore.i][my_carnivore.j].age++;
         return;
     }
 
     if(entity_grid[my_carnivore.i][my_carnivore.j].age >= CARNIVORE_MAXIMUM_AGE || entity_grid[my_carnivore.i][my_carnivore.j].energy == 0){
+        std::cout << "Carnivoro i: " << i  << " j: " << j << "Morreu" << std::endl;
         entity_grid[my_carnivore.i][my_carnivore.j].type = empty;
         entity_grid[my_carnivore.i][my_carnivore.j].vivo = false;
         entity_grid[my_carnivore.i][my_carnivore.j].age = 0;
         entity_grid[my_carnivore.i][my_carnivore.j].energy = 0;
-        entity_grid[my_carnivore.i][my_carnivore.j].id = -1;
+        entity_grid[my_carnivore.i][my_carnivore.j].age++;
         return;
     }
+    int x = generate_random_number(0,100);
+    if(x <= 100*CARNIVORE_EAT_PROBABILITY){ // Comer herbivoro
+        pos_t herbivore_to_eat = find_herbivore_to_eat(entity_grid[my_carnivore.i][my_carnivore.j]);
 
-    if(generate_random_number(0, 100) >= 100*CARNIVORE_MOVE_PROBABILITY){
-        std::cout << "Carnivore id: " << id << " Mudando de lugar" << std::endl;
+        if(!(herbivore_to_eat.i == my_carnivore.i && herbivore_to_eat.j == my_carnivore.j)){
+            std::cout << "Carnivoro i: " << i << " j: " << j << " Comeu Herbivoro" << std::endl;
+            entity_grid[herbivore_to_eat.i][herbivore_to_eat.j].type = empty;
+            entity_grid[herbivore_to_eat.i][herbivore_to_eat.j].vivo = false;
+            entity_grid[herbivore_to_eat.i][herbivore_to_eat.j].age = 0;
+            entity_grid[herbivore_to_eat.i][herbivore_to_eat.j].energy = 0;
+
+            entity_grid[my_carnivore.i][my_carnivore.j].energy += 20;
+            entity_grid[my_carnivore.i][my_carnivore.j].age++;
+
+            return;
+        }
+    }
+
+    if(generate_random_number(0,100) <= 100*CARNIVORE_REPRODUCTION_PROBABILITY){ // Reprodução
+        if(entity_grid[my_carnivore.i][my_carnivore.j].energy >= 20){
+            pos_t new_pos = find_new_position(entity_grid[my_carnivore.i][my_carnivore.j]);
+
+            if(!(new_pos.i == my_carnivore.i && new_pos.j == my_carnivore.j)){
+                std::cout << "Carnivoro i: " << i << " j: " << j << " Reproduziu" << std::endl;
+                entity_grid[new_pos.i][new_pos.j].type = carnivore;
+                entity_grid[new_pos.i][new_pos.j].vivo = true;
+                entity_grid[new_pos.i][new_pos.j].age = 0;
+                entity_grid[new_pos.i][new_pos.j].energy = 100;
+
+                entity_grid[my_carnivore.i][my_carnivore.j].energy -= 10;
+                entity_grid[my_carnivore.i][my_carnivore.j].age ++;
+                return;
+            }
+        }
+    }
+
+    if(generate_random_number(0, 100) <= 100*CARNIVORE_MOVE_PROBABILITY){
         if(entity_grid[my_carnivore.i][my_carnivore.j].energy >= 5){
             pos_t new_pos = find_new_position(entity_grid[my_carnivore.i][my_carnivore.j]);
 
-            if(new_pos.i != my_carnivore.i && new_pos.j != my_carnivore.j){
+            if(!(new_pos.i == my_carnivore.i && new_pos.j == my_carnivore.j)){
+                std::cout << "Carnivore i: " << i << " j : " << j << " Mudando de lugar" << std::endl;
                 entity_grid[new_pos.i][new_pos.j] = entity_grid[my_carnivore.i][my_carnivore.j];
                 entity_grid[new_pos.i][new_pos.j].energy -= 5;
                 entity_grid[new_pos.i][new_pos.j].age += 1;
@@ -376,7 +409,6 @@ void carnivore_simulation(int id){
                 entity_grid[my_carnivore.i][my_carnivore.j].vivo = false;
                 entity_grid[my_carnivore.i][my_carnivore.j].age = 0;
                 entity_grid[my_carnivore.i][my_carnivore.j].energy = 0;
-                entity_grid[my_carnivore.i][my_carnivore.j].id = -1;
             }else{
                 entity_grid[my_carnivore.i][my_carnivore.j].age ++;
             }
@@ -385,10 +417,10 @@ void carnivore_simulation(int id){
     }
 
         
-    std::cout<< "Carnivoro:\n Idade: " << entity_grid[my_carnivore.i][my_carnivore.j].age 
+   /*std::cout<< "Carnivoro:\n Idade: " << entity_grid[my_carnivore.i][my_carnivore.j].age 
                 << "linha: " << entity_grid[my_carnivore.i][my_carnivore.j].position.i
                 << "Coluna: " << entity_grid[my_carnivore.i][my_carnivore.j].position.j
-                << "Vivo: " << entity_grid[my_carnivore.i][my_carnivore.j].vivo << std::endl;
+                << "Vivo: " << entity_grid[my_carnivore.i][my_carnivore.j].vivo << std::endl;*/
     
     entity_grid[my_carnivore.i][my_carnivore.j].age++;
 }
@@ -429,6 +461,7 @@ int main()
         // Create the entities
         // <YOUR CODE HERE>
 
+        m.lock();
         
         for(int i = 0; i < (uint32_t)request_body["plants"]; i++){
             entity_t _plant;
@@ -437,7 +470,6 @@ int main()
             _plant.energy = 0;
             _plant.type = plant;
             _plant.vivo = true;
-            _plant.id = last_id++;
 
             entities.push_back(_plant);
         }
@@ -449,7 +481,6 @@ int main()
             _herb.energy = 100;
             _herb.type = herbivore;
             _herb.vivo = true;
-            _herb.id = last_id++;
 
             entities.push_back(_herb);
         }
@@ -461,12 +492,10 @@ int main()
             _carni.energy = 100;
             _carni.type = carnivore;
             _carni.vivo = true;
-            _carni.id = last_id++;
 
             entities.push_back(_carni);
         }
 
-        m.lock();
         for(int i = 0; i < entities.size(); i++){
             static std::random_device rd;
             static std::mt19937 gen(rd());
@@ -486,7 +515,6 @@ int main()
 
             entities[i].position.i = row;
             entities[i].position.j = col;
-            entities[i].id = last_id++;
 
             entity_grid[row][col] = entities[i];
         }
@@ -514,11 +542,11 @@ int main()
                 for(int j = 0; j < entity_grid[i].size(); j++){
                     if(entity_grid[i][j].vivo == true & entity_grid[i][j].type != empty){
                         if(entity_grid[i][j].type == carnivore){
-                            vetor_de_threads.push_back(std::thread(carnivore_simulation, entity_grid[i][j].id));
+                            vetor_de_threads.push_back(std::thread(carnivore_simulation, i, j));
                         }else if(entity_grid[i][j].type == herbivore){
-                            vetor_de_threads.push_back(std::thread(herbivore_simulation, entity_grid[i][j].id));
+                            vetor_de_threads.push_back(std::thread(herbivore_simulation, i, j));
                         }else if(entity_grid[i][j].type == plant){
-                            vetor_de_threads.push_back(std::thread(plant_simulation, entity_grid[i][j].id));
+                            vetor_de_threads.push_back(std::thread(plant_simulation, i, j));
                         }
                     }
                 }
