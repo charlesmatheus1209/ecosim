@@ -457,6 +457,7 @@ int main()
         // Clear the entity grid
         entity_grid.clear();
         entity_grid.assign(NUM_ROWS, std::vector<entity_t>(NUM_ROWS, { empty, 0, 0}));
+        entities.clear();
         
         // Create the entities
         // <YOUR CODE HERE>
